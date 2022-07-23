@@ -2617,13 +2617,13 @@ func TestCancelRace(t *testing.T) {
 }
 
 //go:embed embed.db
-var fs embed.FS
+var testFS embed.FS
 
 //go:embed embed2.db
-var fs2 embed.FS
+var testFS2 embed.FS
 
-func TestVFS(t *testing.T) {
-	fn, f, err := vfs.New(fs)
+func TestVFSNew(t *testing.T) {
+	fn, f, err := vfs.New(testFS)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2634,7 +2634,7 @@ func TestVFS(t *testing.T) {
 		}
 	}()
 
-	f2n, f2, err := vfs.New(fs2)
+	f2n, f2, err := vfs.New(testFS2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2657,6 +2657,61 @@ func TestVFS(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	defer db2.Close()
+
+	rows, err := db.Query("select * from t order by i;")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var a []int
+	for rows.Next() {
+		var i, j, k int
+		if err := rows.Scan(&i, &j, &k); err != nil {
+			t.Fatal(err)
+		}
+
+		a = append(a, i, j, k)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Log(a)
+	if g, e := fmt.Sprint(a), "[1 2 3 40 50 60]"; g != e {
+		t.Fatalf("got %q, expected %q", g, e)
+	}
+
+	if rows, err = db2.Query("select * from u order by s;"); err != nil {
+		t.Fatal(err)
+	}
+
+	var b []string
+	for rows.Next() {
+		var x, y string
+		if err := rows.Scan(&x, &y); err != nil {
+			t.Fatal(err)
+		}
+
+		b = append(b, x, y)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Log(b)
+	if g, e := fmt.Sprint(b), "[123 xyz abc def]"; g != e {
+		t.Fatalf("got %q, expected %q", g, e)
+	}
+}
+
+func TestConnectorConn(t *testing.T) {
+	c := Connector{Name: "embed.db", FS: testFS}
+	db := sql.OpenDB(c)
+	defer db.Close()
+
+	c2 := Connector{Name: "embed2.db", FS: testFS2}
+	db2 := sql.OpenDB(c2)
 	defer db2.Close()
 
 	rows, err := db.Query("select * from t order by i;")

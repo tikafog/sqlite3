@@ -12,6 +12,7 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"io"
+	"io/fs"
 	"math"
 	"net/url"
 	"reflect"
@@ -25,6 +26,7 @@ import (
 	"modernc.org/libc"
 	"modernc.org/libc/sys/types"
 	sqlite3 "modernc.org/sqlite/lib"
+	"modernc.org/sqlite/vfs"
 )
 
 var (
@@ -1472,6 +1474,57 @@ func (d *Driver) Open(name string) (driver.Conn, error) {
 		}
 	}
 	return c, nil
+}
+
+type Connector struct {
+	Name string
+	FS   fs.FS // if non-nil, will be used by the opened database
+}
+
+type connectorConn struct {
+	*conn
+	vfs *vfs.FS
+}
+
+func (c connectorConn) Close() error {
+	if err := c.conn.Close(); err != nil {
+		return err
+	}
+	// TODO improve
+	if c.vfs == nil {
+		return nil
+	}
+	return c.vfs.Close()
+}
+
+func (c Connector) Connect(context.Context) (_ driver.Conn, rerr error) {
+	name := c.Name
+	var vfsFS *vfs.FS
+	if c.FS != nil {
+		vfsName, v, err := vfs.New(c.FS)
+		if err != nil {
+			return nil, fmt.Errorf("registering FS: %w", err)
+		}
+		defer func() {
+			if rerr == nil {
+				return
+			}
+			v.Close()
+		}()
+		vfsFS = v
+		name += "?vfs=" + vfsName
+	}
+
+	conn, err := newConn(name)
+	if err != nil {
+		return nil, nil
+	}
+
+	return &connectorConn{conn, vfsFS}, nil
+}
+
+func (c Connector) Driver() driver.Driver {
+	return d // TODO: correct?
 }
 
 // FunctionContext represents the context user defined functions execute in.
